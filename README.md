@@ -1,3 +1,2 @@
 # Win32Study
-Win32Study
-StudyWin32
+# StudyWin32
