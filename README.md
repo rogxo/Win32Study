@@ -1,2 +1,2 @@
 # Win32Study
-# StudyWin32
+# Study32Win
