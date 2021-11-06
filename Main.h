@@ -5,11 +5,18 @@
 #include"stdlib.h"
 #include"Psapi.h"
 
+
 BOOL GetWndPid(LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD& dwPid);
-DWORD GetProcessPid(const WCHAR ProcessName[MAX_PATH]);
+DWORD GetProcessIdByProcessName(const WCHAR ProcessName[MAX_PATH]);
 DWORD GetProcessModuleBaseAddress(DWORD dwPid, const WCHAR ModuleName[MAX_MODULE_NAME32 + 1]);
-BOOL RemoteThreadDllInject(const WCHAR* ,const WCHAR *);
+BOOL RemoteThreadDllInject(const WCHAR*, const WCHAR*);
 BOOL FetchProcess();
+BOOL FetchProcessImageBase(DWORD dwPid);
+const WCHAR* GetFileFullPath(const WCHAR* FileName);
+//void DebugMsg(const WCHAR* a, int b, int c);
+
+
+//////////////////////////////////////////
 
 
 BOOL MyLoadLibrary(const WCHAR DllName[MAX_PATH])
@@ -25,10 +32,10 @@ BOOL MyLoadLibrary(const WCHAR DllName[MAX_PATH])
 	return TRUE;
 }
 
-BOOL RemoteThreadDllInject(const WCHAR* ProcessName,const WCHAR * dllpath)
+BOOL RemoteThreadDllInject(const WCHAR* ProcessName, const WCHAR* dllpath)
 {
 	//LPCWSTR dllpath = L"C:\\Users\\Administrator\\Desktop\\TFHack.dll";
-	DWORD dwPid = GetProcessPid(ProcessName);
+	DWORD dwPid = GetProcessIdByProcessName(ProcessName);
 	printf("%d\n", dwPid);
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPid);
 	if (hProcess == NULL)
@@ -40,6 +47,7 @@ BOOL RemoteThreadDllInject(const WCHAR* ProcessName,const WCHAR * dllpath)
 	if (VMAddress == NULL)
 	{
 		printf("VirtualAllocEx()  ERROR_CODE=%x\n", GetLastError());
+		CloseHandle(hProcess);
 		return FALSE;
 	}
 	WriteProcessMemory(hProcess, VMAddress, dllpath, ((wcslen(dllpath) + 1) * 2), NULL);
@@ -48,10 +56,40 @@ BOOL RemoteThreadDllInject(const WCHAR* ProcessName,const WCHAR * dllpath)
 	if (hRemoteThread == NULL)
 	{
 		printf("CreateRemoteThread()  ERROR_CODE=%x\n", GetLastError());
+		CloseHandle(hProcess);
 		return FALSE;
 	}
 	WaitForSingleObject(hRemoteThread, 2000);
 	VirtualFreeEx(hProcess, VMAddress, NULL, MEM_RELEASE);
+	CloseHandle(hProcess);
+	CloseHandle(hRemoteThread);
+	return TRUE;
+}
+
+BOOL RemoteThreadDllFree(const WCHAR* ProcessName, const WCHAR* dllName)
+{
+	//LPCWSTR dllpath = L"C:\\Users\\Administrator\\Desktop\\TFHack.dll";
+	RemoteThreadDllInject(ProcessName, GetFileFullPath(dllName));
+	DWORD dwPid = GetProcessIdByProcessName(ProcessName);
+	//CString str;
+	//str.Format(L"%d", dwPid);
+	//MessageBox(0,str,L"PID",0);
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPid);
+	if (hProcess == NULL)
+	{
+		printf("OpenProcess Fail:%x\n", GetLastError());
+		return FALSE;
+	}
+	DWORD dwHandle = (DWORD)GetProcessModuleBaseAddress(dwPid, dllName);
+
+	HANDLE hRemoteThread = CreateRemoteThread(hProcess, NULL, NULL, (LPTHREAD_START_ROUTINE)FreeLibrary, (LPVOID)dwHandle, 0, NULL);
+	if (hRemoteThread == 0)
+	{
+		printf("CreateRemoteThread()  ERROR_CODE=%x\n", GetLastError());
+		CloseHandle(hProcess);
+		return FALSE;
+	}
+	WaitForSingleObject(hRemoteThread, 2000);
 	CloseHandle(hProcess);
 	CloseHandle(hRemoteThread);
 	return TRUE;
@@ -83,7 +121,7 @@ DWORD GetProcessModuleBaseAddress(DWORD dwPid, const WCHAR ModuleName[MAX_MODULE
 }
 
 
-BOOL GetWndPid(LPCWSTR lpClassName, LPCWSTR lpWindowName,DWORD &dwPid)
+BOOL GetWndPid(LPCWSTR lpClassName, LPCWSTR lpWindowName, DWORD& dwPid)
 {
 	HWND hWnd = FindWindow(lpClassName, lpWindowName);
 	if (hWnd == NULL)
@@ -95,7 +133,7 @@ BOOL GetWndPid(LPCWSTR lpClassName, LPCWSTR lpWindowName,DWORD &dwPid)
 }
 
 
-DWORD GetProcessPid(const WCHAR ProcessName[MAX_PATH])
+DWORD GetProcessIdByProcessName(const WCHAR ProcessName[MAX_PATH])
 {
 	HANDLE hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (hProcessSnap == INVALID_HANDLE_VALUE)
@@ -123,15 +161,15 @@ DWORD GetProcessPid(const WCHAR ProcessName[MAX_PATH])
 
 BOOL FetchProcess()
 {
-	DWORD dwProcessID[0x500] = { 0 };  //ø™ ºµƒ‘§œ»∑÷≈‰Ωœ¥Ûµƒª∫≥Â«¯£¨”√¿¥¥Ê∑≈Ω¯≥ÃID
+	DWORD dwProcessID[0x500] = { 0 };  //ÂºÄÂßãÁöÑÈ¢ÑÂÖàÂàÜÈÖçËæÉÂ§ßÁöÑÁºìÂÜ≤Âå∫ÔºåÁî®Êù•Â≠òÊîæËøõÁ®ãID
 	DWORD dwNeeded = 0;
 	BOOL bEnumRes = EnumProcesses(dwProcessID, sizeof(dwProcessID), &dwNeeded);
-	UINT uCount = dwNeeded / sizeof(DWORD);//ªÒµ√√∂æŸµΩΩ¯≥Ãµƒ ˝¡ø
+	UINT uCount = dwNeeded / sizeof(DWORD);//Ëé∑ÂæóÊûö‰∏æÂà∞ËøõÁ®ãÁöÑÊï∞Èáè
 	for (UINT i = 0; i < uCount; i++)
 	{
-		//÷ª∂‘Ω¯≥ÃΩ¯≥Ã√∂æŸ£¨À˘“‘…Í«ÎQUERY»®œﬁ£¨æﬂÃÂªπµ√∏˘æ›”¶”√…Í«Î»®œﬁ
+		//Âè™ÂØπËøõÁ®ãËøõÁ®ãÊûö‰∏æÔºåÊâÄ‰ª•Áî≥ËØ∑QUERYÊùÉÈôêÔºåÂÖ∑‰ΩìËøòÂæóÊ†πÊçÆÂ∫îÁî®Áî≥ËØ∑ÊùÉÈôê
 		HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, dwProcessID[i]);
-		if (hProcess!=INVALID_HANDLE_VALUE)
+		if (hProcess != INVALID_HANDLE_VALUE)
 		{
 			CHAR szProcessName[MAX_PATH] = { 0 };
 			DWORD dwNameLen = MAX_PATH;
@@ -147,7 +185,7 @@ BOOL FetchProcess()
 
 BOOL FetchProcessImageBase(DWORD dwPid)
 {
-	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, NULL,dwPid);
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, NULL, dwPid);
 	HMODULE hModuleList[] = { 0 };
 	DWORD dwRet = 0;
 	BOOL bRet = EnumProcessModules(hProcess, hModuleList, sizeof(hModuleList), &dwRet);
@@ -159,4 +197,38 @@ BOOL FetchProcessImageBase(DWORD dwPid)
 	}
 	printf("base image address 0x%p", hModuleList[0]);
 	return 0;
+}
+
+const WCHAR* GetFileFullPath(const WCHAR* FileName)
+{
+	static WCHAR FileFullPath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, FileFullPath, MAX_PATH);
+	for (int i = wcslen(FileFullPath); i > 0; i--)
+	{
+		if (FileFullPath[i] == '\\')
+		{
+			memcpy(&FileFullPath[i + 1], FileName, 38);
+			return FileFullPath;
+			break;
+		}
+	}
+	return NULL;
+}
+
+
+
+//void DebugMsg(const WCHAR* a, int b, int c)
+//{
+//	CString str;
+//	str.Format(a, b, c);
+//	AfxMessageBox(str);
+//}
+
+void SetDebugConsole(PCWSTR ConsoleName)
+{
+	AllocConsole();
+	SetConsoleTitle(ConsoleName);
+	FILE* stream;
+	freopen_s(&stream, "CON", "w", stdout);
+	printf("ok\n");
 }
